@@ -1,37 +1,74 @@
 ﻿@page "/"
+@using UbuntuDashboard.Services
+@using UbuntuDashboard.Models
+@inject CpuMetricsService CpuService
+@inject ServicesService servicesService
+@inject NavigationManager Navigation
 
 <div class="container mt-4" style="max-width: 900px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+
     <div class="mb-4">
         <h1 class="fw-bold mb-1">Ubuntu Dashboard</h1>
         <p class="text-muted">Zarządzanie i monitorowanie</p>
     </div>
 
-    <div class="row g-3 mb-4">
-        <div class="col-md-4">
-            <div class="card border-0 shadow-sm p-3 bg-light rounded-3">
-                <span class="text-uppercase text-muted fw-bold small">Procesor</span>
-                <h2 class="text-primary fw-bold mt-2 mb-0">@CpuUsage %</h2>
+    @if (stats == null)
+    {
+        <p><em>Ładowanie statystyk serwera...</em></p>
+    }
+    else
+    {
+        <div class="row g-3 mb-4">
+            <div class="col-md-4">
+                <div class="card border-0 shadow-sm p-3 bg-light rounded-3">
+                    <span class="text-uppercase text-muted fw-bold small">PROCESOR</span>
+                    <h2 class="text-primary fw-bold mt-2 mb-0">@stats.CpuTotalUsage %</h2>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card border-0 shadow-sm p-3 bg-light rounded-3">
+                    <span class="text-uppercase text-muted fw-bold small">PAMIĘĆ RAM</span>
+                    <h2 class="text-primary fw-bold mt-2 mb-0">@stats.RamUsedGB GB / @stats.RamTotalGB GB</h2>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card border-0 shadow-sm p-3 bg-light rounded-3">
+                    <span class="text-uppercase text-muted fw-bold small">UPTIME</span>
+                    <h2 class="fw-bold mt-2 mb-0">@stats.UptimeText</h2>
+                </div>
             </div>
         </div>
-        <div class="col-md-4">
-            <div class="card border-0 shadow-sm p-3 bg-light rounded-3">
-                <span class="text-uppercase text-muted fw-bold small">Pamięć RAM</span>
-                <h2 class="text-primary fw-bold mt-2 mb-0">@RamUsedGB GB / @RamTotalGB GB</h2>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="card border-0 shadow-sm p-3 bg-light rounded-3">
-                <span class="text-uppercase text-muted fw-bold small">Uptime</span>
-                <h2 class="fw-bold mt-2 mb-0">@UptimeText</h2>
-            </div>
-        </div>
-    </div>
 
+        <!-- Zużycie rdzeni procesora -->
+        <div class="card border-0 shadow-sm rounded-3 p-4 mb-4">
+            <h5 class="fw-bold mb-3">Zużycie rdzeni procesora</h5>
+            <div class="row g-3">
+                @foreach (var core in stats.CoresUsage)
+                {
+                    <div class="col-md-6">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span class="fw-bold small">Rdzeń #@core.CoreId</span>
+                            <span class="small text-muted">@core.UsagePercentage %</span>
+                        </div>
+                        <div class="progress" style="height: 10px;">
+                            <div class="progress-bar bg-primary" role="progressbar"
+                                 style="width: @core.UsagePercentage%"
+                                 aria-valuenow="@core.UsagePercentage" aria-valuemin="0" aria-valuemax="100">
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+    <!-- Sekcja Zarządzanie Usługami -->
     <div class="card border-0 shadow-sm rounded-3 p-4">
-        <h4 class="fw-bold mb-4">⚙ Zarządzanie usługami</h4>
+        <h4 class="fw-bold mb-4">⚙️ Zarządzanie usługami</h4>
 
         <div class="list-group list-group-flush">
-            @foreach (var service in Services)
+            <!-- Wpisaliśmy tutaj listę 'services' -->
+            @foreach (var service in services)
             {
                 <div class="list-group-item d-flex justify-content-between align-items-center py-3 border-bottom">
                     <div class="d-flex align-items-center">
@@ -52,12 +89,14 @@
                             <span class="badge bg-danger-subtle text-danger px-3 py-2 rounded-pill fw-bold">INACTIVE</span>
                         }
 
-                        <button class="btn btn-outline-success btn-sm px-3" @onclick="() => StartService(service)">Start</button>
-                        <button class="btn btn-outline-danger btn-sm px-3" @onclick="() => StopService(service)">Stop</button>
+                        <button class="btn btn-outline-success btn-sm px-3" @onclick="() => servicesService.StartService(service)">Start</button>
+                        <button class="btn btn-outline-danger btn-sm px-3" @onclick="() => servicesService.StopService(service)">Stop</button>
 
-                        @if (!string.IsNullOrEmpty(service.Url))
+                        @if (service.Port.HasValue)
                         {
-                            <a href="@service.Url" target="_blank" class="btn btn-primary btn-sm px-3">Otwórz ↗</a>
+                            <a href="@GetServiceUrl(service.Port.Value)" target="_blank" class="btn btn-primary btn-sm px-3">
+                                Otwórz ↗
+                            </a>
                         }
                     </div>
                 </div>
@@ -67,49 +106,19 @@
 </div>
 
 @code {
-    private int CpuUsage = 100;
-    private double RamUsedGB = 0.7;
-    private double RamTotalGB = 18.9;
-    private string UptimeText = "48 minutes";
+    private ServerStatsModel? stats;
+    private List<ServiceModel> services = new();
 
-    // Model danych dla usług
-    public class ServiceModel
+    protected override async Task OnInitializedAsync()
     {
-        public string Name { get; set; } = string.Empty;
-        public string Description { get; set; } = string.Empty;
-        public string Icon { get; set; } = "⚙️";
-        public bool IsActive { get; set; }
-        public string? Url { get; set; }
+        stats = await CpuService.GetServerStatsAsync();
+
+        services = servicesService.GetServices();
     }
 
-    // Lista usług wyświetlana w dashboardzie
-    private List<ServiceModel> Services = new()
+    private string GetServiceUrl(int port)
     {
-        new ServiceModel
-        {
-            Name = "Minecraft Server",
-            Description = "Serwer gry Survival",
-            Icon = "🎮",
-            IsActive = false
-        },
-        new ServiceModel
-        {
-            Name = "FinanceApp",
-            Description = "Port 5005",
-            Icon = "💰",
-            IsActive = false,
-            Url = "http://localhost:5005"
-        }
-    };
-
-    // Metody obsługujące kliknięcia przycisków
-    private void StartService(ServiceModel service)
-    {
-        service.IsActive = true;
-    }
-
-    private void StopService(ServiceModel service)
-    {
-        service.IsActive = false;
+        var baseUri = new Uri(Navigation.BaseUri);
+        return $"{baseUri.Scheme}://{baseUri.Host}:{port}";
     }
 }

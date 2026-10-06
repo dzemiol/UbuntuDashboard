@@ -8,6 +8,7 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 builder.Services.AddScoped<CpuMetricsService>();
+builder.Services.AddScoped<ServicesService>();
 
 var app = builder.Build();
 
